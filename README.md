@@ -1,15 +1,51 @@
 # simple-rag
 
-A tiny, clean RAG demo in one file.
+A small, clean RAG system.
 
-**What it does:**
-1. Reads `sample.txt`
-2. Splits the text into simple fixed-size chunks of 500 characters (no overlap)
-3. Embeds the chunks using ChromaDB (default model: all-MiniLM-L6-v2)
-4. Stores them in a local ChromaDB collection
-5. Runs a hardcoded query and prints the top 3 most relevant chunks with similarity scores
+This project started as a simple script and evolved on **Day 2** into a proper FastAPI service.
 
-No CLI. No extra frameworks. Just `uv run python main.py`.
+## Original Script (still works)
+
+```bash
+uv run python main.py
+```
+
+## Day 2: FastAPI + Document Upload
+
+On the branch `day2/fastapi-rag-upload` we added:
+
+- One upload endpoint that accepts **either PDF or DOCX** (one file at a time)
+- Automatic text extraction, 500-char chunking, and storage in ChromaDB
+- One retrieve endpoint to search the RAG index
+
+### Run the API
+
+```bash
+uv sync
+uv run uvicorn app.main:app --reload
+```
+
+Then open http://127.0.0.1:8000/docs
+
+### Upload a document
+
+```bash
+curl -X POST "http://127.0.0.1:8000/upload" \
+  -F "file=@myfile.pdf"
+```
+
+or
+
+```bash
+curl -X POST "http://127.0.0.1:8000/upload" \
+  -F "file=@report.docx"
+```
+
+### Retrieve from RAG
+
+```bash
+curl "http://127.0.0.1:8000/retrieve?q=What%20is%20RAG&top_k=3"
+```
 
 ## Requirements
 

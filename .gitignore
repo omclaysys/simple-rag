@@ -54,3 +54,8 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Personal task tracking (not for commit)
+task.md
+tasks/
+*.task.md
