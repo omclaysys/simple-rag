@@ -2,7 +2,7 @@
 
 A small, clean RAG system with document upload.
 
-**Current version (Day 2):** FastAPI API that lets you upload PDF or DOCX files and search them.
+**Current:** FastAPI + LangChain. Upload PDF or DOCX → exact 500-char chunks (no overlap) → local embeddings (all-MiniLM-L6-v2) → ChromaDB.
 
 Branch: `day2/fastapi-rag-upload`
 
