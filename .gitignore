@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[oc]
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv
+venv/
+ENV/
+env/
+
+# UV
+# Note: uv.lock is committed for reproducibility
+
+# ChromaDB local data (never commit the vector DB)
+chroma_db/
+chroma_db*/
+*.chroma
+
+# Ruff linter cache
+.ruff_cache/
+
+# Logs and environment files
+*.log
+.env
+.env.*
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

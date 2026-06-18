@@ -1,0 +1,9 @@
+Python is a high-level, interpreted programming language known for its readability and versatility.
+
+Retrieval-Augmented Generation (RAG) combines retrieval from a knowledge base with generation from a large language model.
+
+Embeddings turn text into dense vectors that capture semantic meaning, allowing similarity search.
+
+ChromaDB is a lightweight vector database that runs locally and makes it easy to store and query embeddings without any infrastructure.
+
+Chunking text into smaller pieces improves retrieval quality because embeddings work best on focused passages rather than entire long documents.
