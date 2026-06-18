@@ -1,68 +1,28 @@
-"""Document text extraction for PDF and DOCX.
+"""Extract text from PDF or DOCX files.
 
-Clean, focused functions. No LangChain.
+In this app we ONLY ever get bytes (from `await file.read()` in FastAPI).
+We don't need paths or file objects, so we keep it dead simple.
 """
 
-from __future__ import annotations
-
 from io import BytesIO
-from pathlib import Path
-from typing import BinaryIO
 
 import pypdfium2 as pdfium
 from docx import Document
 
 
-def extract_pdf_text(file: BinaryIO | BytesIO | bytes | Path | str) -> str:
-    """Extract plain text from a PDF file.
+def extract_text(filename: str, data: bytes) -> str:
+    """Turn uploaded file bytes into plain text.
 
-    Accepts file-like object, bytes, Path, or str path.
-    Returns concatenated text from all pages.
+    Supports only .pdf and .docx.
     """
-    if isinstance(file, (str, Path)):
-        pdf = pdfium.PdfDocument(str(file))
-    elif isinstance(file, (bytes, bytearray)):
-        pdf = pdfium.PdfDocument(BytesIO(file))
-    else:
-        # file-like
-        file.seek(0)
-        data = file.read()
+    name = filename.lower()
+
+    if name.endswith(".pdf"):
         pdf = pdfium.PdfDocument(BytesIO(data))
+        return "\n".join(page.get_textpage().get_text_bounded() for page in pdf).strip()
 
-    texts: list[str] = []
-    for page in pdf:
-        textpage = page.get_textpage()
-        texts.append(textpage.get_text_bounded())
-
-    return "\n".join(texts).strip()
-
-
-def extract_docx_text(file: BinaryIO | BytesIO | bytes | Path | str) -> str:
-    """Extract plain text from a DOCX file.
-
-    Accepts file-like object, bytes, Path, or str path.
-    Returns all paragraph text joined by newlines.
-    """
-    if isinstance(file, (str, Path)):
-        doc = Document(str(file))
-    elif isinstance(file, (bytes, bytearray)):
-        doc = Document(BytesIO(file))
-    else:
-        file.seek(0)
-        data = file.read()
+    if name.endswith(".docx"):
         doc = Document(BytesIO(data))
+        return "\n".join(p.text for p in doc.paragraphs).strip()
 
-    return "\n".join(p.text for p in doc.paragraphs).strip()
-
-
-def extract_text(filename: str, file: BinaryIO | BytesIO | bytes) -> str:
-    """Dispatch to the correct extractor based on filename extension.
-
-    Raises ValueError for unsupported types.
-    """
-    lower = filename.lower()
-    if lower.endswith(".pdf"):
-        return extract_pdf_text(file)
-    if lower.endswith(".docx"):
-        return extract_docx_text(file)
-    raise ValueError(f"Unsupported file type: {filename}. Only .pdf and .docx allowed.")
+    raise ValueError(f"Only .pdf and .docx are supported. Got: {filename}")
