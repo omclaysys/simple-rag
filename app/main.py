@@ -60,7 +60,9 @@ async def askquestion(payload: dict):
     if not question or not str(question).strip():
         raise HTTPException(400, "question is required")
 
+    threshold = float(payload.get("threshold", 0.4)) if isinstance(payload, dict) else 0.4
+
     try:
-        return ask(str(question))
+        return ask(str(question), threshold)
     except Exception as error:
         raise HTTPException(500, str(error))

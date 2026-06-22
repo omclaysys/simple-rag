@@ -82,12 +82,10 @@ def ingest(filename: str, data: bytes) -> int:
         text = (chunk.page_content or "").strip()
         if not text:
             continue
-        documents.append(
-            Document(
-                page_content=text,
-                metadata={"source": filename, "type": doc_type, "chunkindex": i},
-            )
-        )
+        meta = {"source": filename, "type": doc_type, "chunkindex": i}
+        if doc_type == "pdf":
+            meta["page"] = chunk.metadata.get("page")
+        documents.append(Document(page_content=text, metadata=meta))
         ids.append(f"{filename}-{i}")
 
     if not documents:
@@ -103,8 +101,8 @@ def ingest(filename: str, data: bytes) -> int:
 # Search
 # ---------------------------------------------------------------------------
 
-def search(query: str, topk: int = 3) -> list[dict[str, Any]]:
-    """Similarity search. Returns list of {text, score, source, type, chunkindex}."""
+def search(query: str, topk: int = 3, threshold: float = 0.4) -> list[dict[str, Any]]:
+    """Similarity search. Returns list of {text, score, source, type, chunkindex, page}."""
     if not query or not query.strip():
         return []
 
@@ -118,8 +116,10 @@ def search(query: str, topk: int = 3) -> list[dict[str, Any]]:
             "source": (doc.metadata or {}).get("source"),
             "type": (doc.metadata or {}).get("type"),
             "chunkindex": (doc.metadata or {}).get("chunkindex"),
+            "page": (doc.metadata or {}).get("page"),
         }
         for doc, distance in results
+        if (1 - float(distance)) >= threshold
     ]
 
 
@@ -133,12 +133,12 @@ RAG_PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 
-def ask(question: str) -> dict:
+def ask(question: str, threshold: float = 0.4) -> dict:
     """Simple RAG: retrieve relevant chunks, then ask the LLM."""
     if not question or not question.strip():
         return {"question": question, "answer": "", "sources": []}
 
-    sources = search(question, topk=3)
+    sources = search(question, topk=3, threshold=threshold)
     context = "\n\n".join(s["text"] for s in sources)
 
     chain = RAG_PROMPT | _llm
