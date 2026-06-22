@@ -2,6 +2,7 @@ from __future__ import annotations
 from io import BytesIO
 from threading import Lock
 from typing import Any
+import os
 
 from langchain_core.documents import Document
 from langchain_core.documents.base import Blob
@@ -10,7 +11,7 @@ from langchain_community.document_loaders.parsers.pdf import PyPDFium2Parser
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain.agents import create_agent
 from docx import Document as DocxDoc
 
@@ -106,9 +107,13 @@ def retrievecontext(query: str):
 def getgeminiagent():
     global geminiagent
     if geminiagent is None:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key="AIzaSyCnI40ytl7iJSjFmnQpE4p-N0jJylEdbzg",
+        apikey = os.getenv("GROQ_API_KEY")
+        if not apikey:
+            raise RuntimeError("GROQ_API_KEY is not set")
+
+        llm = ChatGroq(
+            model="llama-3.1-8b-instant",
+            groq_api_key=apikey,
             temperature=0.2,
         )
 
