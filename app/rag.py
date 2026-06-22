@@ -16,39 +16,29 @@ from langchain_text_splitters import CharacterTextSplitter
 from docx import Document as DocxDocument
 
 # ---------------------------------------------------------------------------
-# Globals (lazy-initialized)
+# Globals
 # ---------------------------------------------------------------------------
 
-_vector_store: Chroma | None = None
-_llm: ChatGroq | None = None
 _lock = Lock()
 
-# ---------------------------------------------------------------------------
-# Vector store
-# ---------------------------------------------------------------------------
+_vector_store = Chroma(
+    collection_name="documents",
+    embedding_function=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"),
+    persist_directory="./chroma_db",
+    collection_metadata={"hnsw:space": "cosine"},
+)
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHUNK_SIZE = 500
+_api_key = os.getenv("GROQ_API_KEY")
+if not _api_key:
+    raise RuntimeError("GROQ_API_KEY is not set")
 
-
-def _get_vector_store() -> Chroma:
-    """Return (and lazily create) the Chroma vector store."""
-    global _vector_store
-    if _vector_store is None:
-        _vector_store = Chroma(
-            collection_name="documents",
-            embedding_function=HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL),
-            persist_directory="./chroma_db",
-            collection_metadata={"hnsw:space": "cosine"},
-        )
-    return _vector_store
-
+_llm = ChatGroq(model="llama-3.1-8b-instant", groq_api_key=_api_key, temperature=0.2)
 
 # ---------------------------------------------------------------------------
 # Document loading
 # ---------------------------------------------------------------------------
 
-_text_splitter = CharacterTextSplitter(separator="", chunk_size=CHUNK_SIZE, chunk_overlap=0)
+_text_splitter = CharacterTextSplitter(separator="", chunk_size=500, chunk_overlap=0)
 
 
 def _load_pdf(data: bytes, filename: str) -> list[Document]:
@@ -104,7 +94,7 @@ def ingest(filename: str, data: bytes) -> int:
         return 0
 
     with _lock:
-        _get_vector_store().add_documents(documents, ids=ids)
+        _vector_store.add_documents(documents, ids=ids)
 
     return len(documents)
 
@@ -119,7 +109,7 @@ def search(query: str, topk: int = 3) -> list[dict[str, Any]]:
         return []
 
     with _lock:
-        results = _get_vector_store().similarity_search_with_score(query, k=topk)
+        results = _vector_store.similarity_search_with_score(query, k=topk)
 
     return [
         {
@@ -134,24 +124,13 @@ def search(query: str, topk: int = 3) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# LLM + RAG
+# RAG
 # ---------------------------------------------------------------------------
 
 RAG_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "Answer based on the context provided. If not found, say you don't know."),
     ("human", "Context:\n{context}\n\nQuestion: {question}"),
 ])
-
-
-def _get_llm() -> ChatGroq:
-    """Return (and lazily create) the Groq LLM."""
-    global _llm
-    if _llm is None:
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise RuntimeError("GROQ_API_KEY is not set")
-        _llm = ChatGroq(model="llama-3.1-8b-instant", groq_api_key=api_key, temperature=0.2)
-    return _llm
 
 
 def ask(question: str) -> dict:
@@ -162,7 +141,7 @@ def ask(question: str) -> dict:
     sources = search(question, topk=3)
     context = "\n\n".join(s["text"] for s in sources)
 
-    chain = RAG_PROMPT | _get_llm()
+    chain = RAG_PROMPT | _llm
     answer = chain.invoke({"context": context, "question": question}).content
 
     return {
