@@ -21,18 +21,30 @@ from docx import Document as DocxDocument
 
 _lock = Lock()
 
-_vector_store = Chroma(
-    collection_name="documents",
-    embedding_function=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"),
-    persist_directory="./chroma_db",
-    collection_metadata={"hnsw:space": "cosine"},
-)
+_vector_store: Chroma | None = None
 
 _api_key = os.getenv("GROQ_API_KEY")
 if not _api_key:
     raise RuntimeError("GROQ_API_KEY is not set")
 
 _llm = ChatGroq(model="llama-3.1-8b-instant", groq_api_key=_api_key, temperature=0.2)
+
+# ---------------------------------------------------------------------------
+# Vector store (lazy-init to avoid uvicorn reload issues)
+# ---------------------------------------------------------------------------
+
+
+def _get_vector_store() -> Chroma:
+    global _vector_store
+    if _vector_store is None:
+        _vector_store = Chroma(
+            collection_name="documents",
+            embedding_function=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"),
+            persist_directory="./chroma_db",
+            collection_metadata={"hnsw:space": "cosine"},
+        )
+    return _vector_store
+
 
 # ---------------------------------------------------------------------------
 # Document loading
@@ -92,7 +104,7 @@ def ingest(filename: str, data: bytes) -> int:
         return 0
 
     with _lock:
-        _vector_store.add_documents(documents, ids=ids)
+        _get_vector_store().add_documents(documents, ids=ids)
 
     return len(documents)
 
@@ -107,7 +119,7 @@ def search(query: str, topk: int = 3, threshold: float = 0.4) -> list[dict[str, 
         return []
 
     with _lock:
-        results = _vector_store.similarity_search_with_score(query, k=topk)
+        results = _get_vector_store().similarity_search_with_score(query, k=topk)
 
     return [
         {
