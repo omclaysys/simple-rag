@@ -1,6 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Annotated
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from app.rag import ingest, search, ask
 

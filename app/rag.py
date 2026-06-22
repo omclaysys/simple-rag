@@ -6,19 +6,18 @@ import os
 
 from langchain_core.documents import Document
 from langchain_core.documents.base import Blob
-from langchain_core.tools import tool
 from langchain_community.document_loaders.parsers.pdf import PyPDFium2Parser
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
-from langchain.agents import create_agent
+from langchain_core.prompts import ChatPromptTemplate
 from docx import Document as DocxDoc
 
 chunksplitter = CharacterTextSplitter(separator="", chunk_size=500, chunk_overlap=0)
 
 vectorstore: Chroma | None = None
-geminiagent = None
+llm = None
 dblock = Lock()
 
 
@@ -95,72 +94,39 @@ def search(query: str, topk: int = 3) -> list[dict[str, Any]]:
     return output
 
 
-@tool(response_format="content_and_artifact")
-def retrievecontext(query: str):
-    """Search the documents and return relevant chunks."""
-    with dblock:
-        docs = getvectorstore().similarity_search(query, k=4)
-    text = "\n\n".join(f"Source: {d.metadata}\n{d.page_content}" for d in docs)
-    return text, docs
-
-
-def getgeminiagent():
-    global geminiagent
-    if geminiagent is None:
+def getllm():
+    global llm
+    if llm is None:
         apikey = os.getenv("GROQ_API_KEY")
         if not apikey:
             raise RuntimeError("GROQ_API_KEY is not set")
-
         llm = ChatGroq(
             model="llama-3.1-8b-instant",
             groq_api_key=apikey,
             temperature=0.2,
         )
+    return llm
 
-        geminiagent = create_agent(
-            model=llm,
-            tools=[retrievecontext],
-            system_prompt=(
-                "You are a helpful assistant. "
-                "Use the retrievecontext tool to get information from the documents. "
-                "If nothing useful is found, say you do not know. "
-                "Keep answers short and clear."
-            ),
-        )
-    return geminiagent
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "Answer based on the context provided. If not found, say you don't know."),
+    ("human", "Context:\n{context}\n\nQuestion: {question}"),
+])
 
 
 def ask(question: str) -> dict:
-    """Answer using Gemini with retrieval tool (RAG)."""
+    """Simple RAG: retrieve chunks, pass to LLM."""
     if not question or not question.strip():
         return {"question": question, "answer": "", "sources": []}
 
-    agent = getgeminiagent()
-    result = agent.invoke({"messages": [{"role": "user", "content": question}]})
+    results = search(question, topk=3)
+    context = "\n\n".join(r["text"] for r in results)
 
-    messages = result.get("messages", [])
-    answer = ""
-
-    for message in reversed(messages):
-        if getattr(message, "tool_calls", None):
-            continue
-        content = getattr(message, "content", "")
-        if content:
-            if isinstance(content, list):
-                parts = [block.get("text", "") if isinstance(block, dict) else str(block) for block in content]
-                answer = " ".join(p for p in parts if p).strip()
-            else:
-                answer = str(content).strip()
-            if answer:
-                break
-
-    sources = [
-        {"text": r["text"], "source": r["source"], "chunkindex": r["chunkindex"]}
-        for r in search(question, topk=3)
-    ]
+    chain = prompt | getllm()
+    answer = chain.invoke({"context": context, "question": question}).content
 
     return {
         "question": question,
         "answer": answer or "No answer generated.",
-        "sources": sources,
+        "sources": results,
     }
