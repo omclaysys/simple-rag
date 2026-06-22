@@ -1,73 +1,161 @@
 from __future__ import annotations
 from io import BytesIO
+from threading import Lock
 from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.documents.base import Blob
+from langchain_core.tools import tool
 from langchain_community.document_loaders.parsers.pdf import PyPDFium2Parser
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.agents import create_agent
 from docx import Document as DocxDoc
 
-splitter = CharacterTextSplitter(separator="", chunk_size=500, chunk_overlap=0)
-store: Chroma | None = None
+chunksplitter = CharacterTextSplitter(separator="", chunk_size=500, chunk_overlap=0)
+
+vectorstore: Chroma | None = None
+geminiagent = None
+dblock = Lock()
 
 
-def get_store() -> Chroma:
-    global store
-    if store is None:
-        store = Chroma(
+def getvectorstore() -> Chroma:
+    global vectorstore
+    if vectorstore is None:
+        vectorstore = Chroma(
             collection_name="documents",
             embedding_function=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"),
             persist_directory="./chroma_db",
             collection_metadata={"hnsw:space": "cosine"},
         )
-    return store
+    return vectorstore
 
 
-def load(name: str, data: bytes) -> list[Document]:
-    n = name.lower()
-    if n.endswith(".pdf"):
-        return list(PyPDFium2Parser().lazy_parse(Blob.from_data(data, path=name)))
-    if n.endswith(".docx"):
-        txt = "\n".join(p.text for p in DocxDoc(BytesIO(data)).paragraphs).strip()
-        return [Document(page_content=txt)] if txt else []
-    raise ValueError("pdf/docx only")
+def loaddocuments(filename: str, data: bytes) -> list[Document]:
+    name = filename.lower()
+    if name.endswith(".pdf"):
+        blob = Blob.from_data(data, path=filename)
+        return list(PyPDFium2Parser().lazy_parse(blob))
+    if name.endswith(".docx"):
+        doc = DocxDoc(BytesIO(data))
+        text = "\n".join(p.text for p in doc.paragraphs).strip()
+        return [Document(page_content=text)] if text else []
+    raise ValueError("Only PDF and DOCX supported")
 
 
 def ingest(filename: str, data: bytes) -> int:
-    docs = load(filename, data)
+    docs = loaddocuments(filename, data)
     if not docs:
         return 0
 
-    chunks = splitter.split_documents(docs)
-    kind = "pdf" if filename.lower().endswith(".pdf") else "docx"
+    chunks = chunksplitter.split_documents(docs)
+    doctype = "pdf" if filename.lower().endswith(".pdf") else "docx"
 
-    out, ids = [], []
-    for d in chunks:
-        t = (d.page_content or "").strip()
-        if not t:
+    final = []
+    ids = []
+    for chunk in chunks:
+        text = (chunk.page_content or "").strip()
+        if not text:
             continue
-        i = len(out)
-        out.append(Document(page_content=t, metadata={"source": filename, "type": kind, "chunk_index": i}))
-        ids.append(f"{filename}_{i}")
+        index = len(final)
+        final.append(Document(
+            page_content=text,
+            metadata={"source": filename, "type": doctype, "chunkindex": index}
+        ))
+        ids.append(f"{filename}-{index}")
 
-    if not out:
+    if not final:
         return 0
 
-    get_store().add_documents(out, ids=ids)
-    return len(out)
+    with dblock:
+        getvectorstore().add_documents(final, ids=ids)
+    return len(final)
 
 
-def search(q: str, k: int = 3) -> list[dict[str, Any]]:
-    if not q.strip():
+def search(query: str, topk: int = 3) -> list[dict[str, Any]]:
+    if not query or not query.strip():
         return []
-    pairs = get_store().similarity_search_with_score(q, k=k)
-    return [{
-        "text": d.page_content,
-        "score": round(1 - float(dist), 4) if dist is not None else None,
-        "source": (d.metadata or {}).get("source"),
-        "type": (d.metadata or {}).get("type"),
-        "chunk_index": (d.metadata or {}).get("chunk_index"),
-    } for d, dist in pairs]
+
+    with dblock:
+        results = getvectorstore().similarity_search_with_score(query, k=topk)
+
+    output = []
+    for doc, distance in results:
+        meta = doc.metadata or {}
+        output.append({
+            "text": doc.page_content,
+            "score": round(1 - float(distance), 4) if distance is not None else None,
+            "source": meta.get("source"),
+            "type": meta.get("type"),
+            "chunkindex": meta.get("chunkindex"),
+        })
+    return output
+
+
+@tool(response_format="content_and_artifact")
+def retrievecontext(query: str):
+    """Search the documents and return relevant chunks."""
+    with dblock:
+        docs = getvectorstore().similarity_search(query, k=4)
+    text = "\n\n".join(f"Source: {d.metadata}\n{d.page_content}" for d in docs)
+    return text, docs
+
+
+def getgeminiagent():
+    global geminiagent
+    if geminiagent is None:
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            google_api_key="AIzaSyCnI40ytl7iJSjFmnQpE4p-N0jJylEdbzg",
+            temperature=0.2,
+        )
+
+        geminiagent = create_agent(
+            model=llm,
+            tools=[retrievecontext],
+            system_prompt=(
+                "You are a helpful assistant. "
+                "Use the retrievecontext tool to get information from the documents. "
+                "If nothing useful is found, say you do not know. "
+                "Keep answers short and clear."
+            ),
+        )
+    return geminiagent
+
+
+def ask(question: str) -> dict:
+    """Answer using Gemini with retrieval tool (RAG)."""
+    if not question or not question.strip():
+        return {"question": question, "answer": "", "sources": []}
+
+    agent = getgeminiagent()
+    result = agent.invoke({"messages": [{"role": "user", "content": question}]})
+
+    messages = result.get("messages", [])
+    answer = ""
+
+    for message in reversed(messages):
+        if getattr(message, "tool_calls", None):
+            continue
+        content = getattr(message, "content", "")
+        if content:
+            if isinstance(content, list):
+                parts = [block.get("text", "") if isinstance(block, dict) else str(block) for block in content]
+                answer = " ".join(p for p in parts if p).strip()
+            else:
+                answer = str(content).strip()
+            if answer:
+                break
+
+    sources = [
+        {"text": r["text"], "source": r["source"], "chunkindex": r["chunkindex"]}
+        for r in search(question, topk=3)
+    ]
+
+    return {
+        "question": question,
+        "answer": answer or "No answer generated.",
+        "sources": sources,
+    }
