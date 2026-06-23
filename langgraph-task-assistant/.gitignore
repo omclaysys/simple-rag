@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[oc]
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv
+venv/
+ENV/
+env/
+
+# UV
+# Note: uv.lock is committed for reproducibility
+
+# Ruff
+.ruff_cache/
+
+# Logs and environment files
+*.log
+.env
+.env.*
+.env.local
+
+# Task data (in-memory only for this demo, but ignore any accidental dumps)
+tasks.json
+*.jsonl
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Generated artifacts
+graph.png
+graph.mmd
